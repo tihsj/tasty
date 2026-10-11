@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head> 
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Controle de Clientes e Reposição - Tasty Shake</title>
@@ -10,7 +10,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // ==========================================================
         // COLE SUAS CHAVES DO FIREBASE ABAIXO:
@@ -32,7 +32,7 @@
         const AUTORIZADO_EMAIL = "espacotastyshake@gmail.com";
         const NOME_USUARIO = "monica";
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             const loginPanel = document.getElementById('loginPanel');
             const appContainer = document.getElementById('appContainer');
             const loginForm = document.getElementById('loginForm');
@@ -41,6 +41,15 @@
             const loginMessage = document.getElementById('loginMessage');
             const logoutButton = document.getElementById('logoutButton');
             let dadosCarregados = false;
+
+            // Não manter a sessão entre recargas/aberturas da página.
+            // Isso faz a tela de login aparecer novamente ao abrir o site.
+            try {
+                await setPersistence(auth, inMemoryPersistence);
+                await signOut(auth);
+            } catch (error) {
+                console.error('Não foi possível reiniciar a sessão:', error);
+            }
 
             loginForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
