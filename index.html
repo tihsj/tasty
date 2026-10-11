@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle de Clientes e Reposição - Tasty Shake</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDK (Versão Modular) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        // ==========================================================
+        // COLE SUAS CHAVES DO FIREBASE ABAIXO:
+        // ==========================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyANpiWqCHpIHO97Y6qGkl9DTaL6psKhBC8",
+            authDomain: "tasty-web-c3420.firebaseapp.com",
+            projectId: "tasty-web-c3420",
+            storageBucket: "tasty-web-c3420.firebasestorage.app",
+            messagingSenderId: "216354493205",
+            appId: "1:216354493205:web:7933fef0403f792b6a8f1c",
+            measurementId: "G-SS99GFG0JF"
+        };
+
+        // Inicializar Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const AUTORIZADO_EMAIL = "espacotastyshake@gmail.com";
+        const NOME_USUARIO = "monica";
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const loginPanel = document.getElementById('loginPanel');
+            const appContainer = document.getElementById('appContainer');
+            const loginForm = document.getElementById('loginForm');
+            const loginUser = document.getElementById('loginUser');
+            const loginPassword = document.getElementById('loginPassword');
+            const loginMessage = document.getElementById('loginMessage');
+            const logoutButton = document.getElementById('logoutButton');
+            let dadosCarregados = false;
+
+            // Não manter a sessão entre recargas/aberturas da página.
+            // Isso faz a tela de login aparecer novamente ao abrir o site.
+            try {
+                await setPersistence(auth, inMemoryPersistence);
+                await signOut(auth);
+            } catch (error) {
+                console.error('Não foi possível reiniciar a sessão:', error);
+                loginMessage.textContent = 'Falha ao iniciar autenticação. Atualize a página.';
+                loginForm.querySelector('button[type=submit]').disabled = true;
+                return;
+            }
+
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                loginMessage.textContent = 'Verificando acesso...';
+                loginMessage.className = 'text-sm mt-3 text-slate-600';
+                const informado = loginUser.value.trim();
+                const email = informado.toLowerCase() === NOME_USUARIO ? AUTORIZADO_EMAIL : informado;
+                try {
+                    await signInWithEmailAndPassword(auth, email, loginPassword.value);
+                    loginPassword.value = '';
+                    loginMessage.textContent = '';
+                } catch (error) {
+                    loginMessage.textContent = 'Usuário ou senha inválidos. Confira os dados e tente novamente.';
+                    loginMessage.className = 'text-sm mt-3 text-red-600';
+                }
+            });
+
+            logoutButton.addEventListener('click', async () => { await signOut(auth); });
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user && user.email && user.email.toLowerCase() === AUTORIZADO_EMAIL) {
+                    loginPanel.style.display = 'none';
+                    appContainer.style.display = 'block';
+                    if (!dadosCarregados) {
+                        dadosCarregados = true;
+                        try { await carregarProdutos(); await carregarClientes(); }
+                        catch (error) { console.error(error); alert('Não foi possível carregar os dados. Confira as regras do Firestore.'); }
+                    }
+                } else {
+                    appContainer.style.display = 'none';
+                    loginPanel.style.display = 'flex';
+                    dadosCarregados = false;
+                    if (user) await signOut(auth);
+                }
+            });
+
+            const vendaForm = document.getElementById('vendaForm');
+            const produtoForm = document.getElementById('produtoForm');
+            const tabelaClientes = document.getElementById('tabelaClientes');
+            const totalClientesEl = document.getElementById('totalClientes');
+            const selectProduto = document.getElementById('produto');
+            const listaProdutosBadge = document.getElementById('listaProdutosBadge');
+            const novoProdutoNomeInput = document.getElementById('novoProdutoNome');
+
+            // Listas padrão caso o banco esteja vazio
+            let produtosPadrao = ['Shake F1', 'Fiber Concentrate', 'Herbal Tea', 'Nutri Soup', 'Multifiber'];
+
+            async function carregarProdutos() {
+                const querySnapshot = await getDocs(collection(db, "produtos"));
+                let produtos = [];
+                querySnapshot.forEach((doc) => {
+                    produtos.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Se não houver produtos cadastrados no Firebase, cria os padrões
+                if (produtos.length === 0) {
+                    for (let p of produtosPadrao) {
+                        await addDoc(collection(db, "produtos"), { nome: p });
+                    }
+                    return carregarProdutos();
+                }
+
+                atualizarSelectProdutos(produtos);
+            }
+
+            function atualizarSelectProdutos(produtos) {
+                selectProduto.innerHTML = '<option value="">Selecione um produto</option>';
+                listaProdutosBadge.innerHTML = '';
+
+                produtos.forEach(prod => {
+                    // Preenche o select
+                    const opt = document.createElement('option');
+                    opt.value = prod.nome;
+                    opt.textContent = prod.nome;
+                    selectProduto.appendChild(opt);
+
+                    // Preenche as tags visuais
+                    const badge = document.createElement('span');
+                    badge.className = 'inline-flex items-center bg-slate-100 text-slate-700 text-xs px-3 py-1 rounded-full border border-slate-200';
+                    badge.innerHTML = `
+                        ${prod.nome}
+                        <button type="button" onclick="removerProduto('${prod.id}')" class="ml-2 text-slate-400 hover:text-red-600 font-bold">&times;</button>
+                    `;
+                    listaProdutosBadge.appendChild(badge);
+                });
+            }
+
+            produtoForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const nomeProd = novoProdutoNomeInput.value.trim();
+                if (nomeProd) {
+                    await addDoc(collection(db, "produtos"), { nome: nomeProd });
+                    novoProdutoNomeInput.value = '';
+                    carregarProdutos();
+                }
+            });
+
+            window.removerProduto = async function(id) {
+                if (confirm('Deseja remover este produto?')) {
+                    await deleteDoc(doc(db, "produtos", id));
+                    carregarProdutos();
+                }
+            }
+
+            async function carregarClientes() {
+                const querySnapshot = await getDocs(collection(db, "clientes"));
+                let clientes = [];
+                querySnapshot.forEach((doc) => {
+                    clientes.push({ id: doc.id, ...doc.data() });
+                });
+                 clientesCache = clientes;
+                 atualizarDashboard();
+                 aplicarBusca();
+            }
+
+            function calcularDiasRestantes(dataVendaStr, quantidade, dose) {
+                const hoje = new Date();
+                hoje.setHours(0, 0, 0, 0);
+
+                const dataVenda = new Date(dataVendaStr + 'T00:00:00');
+                const dataTermino = new Date(dataVenda);
+                dataTermino.setDate(dataVenda.getDate() + (quantidade >= dose ? Math.floor(quantidade / dose) : 0));
+
+                const diffTempo = dataTermino - hoje;
+                const diasRestantes = Math.ceil(diffTempo / (1000 * 60 * 60 * 24));
+
+                return { diasRestantes, dataTermino };
+            }
+
+             function atualizarDashboard() {
+                 let emUso=0, repor=0, esgotados=0;
+                 for (const item of clientesCache) {
+                     const { diasRestantes } = calcularDiasRestantes(item.dataVenda,item.quantidade,item.dose);
+                     if (diasRestantes <= 0 || item.quantidade < item.dose) esgotados++;
+                     else if (diasRestantes <= 5) repor++;
+                     else emUso++;
+                 }
+                 document.getElementById('dashTotalClientes').textContent = clientesCache.length;
+                 document.getElementById('dashEmUso').textContent = emUso;
+                 document.getElementById('dashRepor').textContent = repor;
+                 document.getElementById('dashEsgotados').textContent = esgotados;
+                 const banner=document.getElementById('alertBanner');
+                 banner.classList.toggle('hidden', !(repor+esgotados));
+                 banner.textContent = `⚠️ ${repor+esgotados} cliente(s) precisam de atenção: ${esgotados} esgotado(s) e ${repor} para reposição.`;
+             }
+             function aplicarBusca() {
+                 const termo=document.getElementById('buscaCliente').value.trim().toLowerCase();
+                 const filtrados=clientesCache.filter(item=>{
+                     const {diasRestantes}=calcularDiasRestantes(item.dataVenda,item.quantidade,item.dose);
+                     return (!filtroReposicao || diasRestantes<=5 || item.quantidade<item.dose) &&
+                         (!termo || [item.cliente,item.produto,item.telefone].some(v=>String(v||'').toLowerCase().includes(termo)));
+                 });
+                 renderizarTabela(filtrados);
+             }
+             document.getElementById('buscaCliente').addEventListener('input',aplicarBusca);
+             document.getElementById('btnMostrarTodos').addEventListener('click',()=>{filtroReposicao=false;aplicarBusca();});
+             document.getElementById('btnMostrarReposicao').addEventListener('click',()=>{filtroReposicao=true;aplicarBusca();});
+
+            function renderizarTabela(clientes) {
+                tabelaClientes.innerHTML = '';
+                totalClientesEl.textContent = `${clientes.length} ${clientes.length === 1 ? 'cadastro' : 'cadastros'}`;
+
+                if (clientes.length === 0) {
+                    tabelaClientes.innerHTML = `
+                        <tr>
+                            <td colspan="6" class="px-6 py-8 text-center text-slate-400">Nenhum cliente cadastrado ainda.</td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                clientes.forEach((item) => {
+                    const { diasRestantes, dataTermino } = calcularDiasRestantes(item.dataVenda, item.quantidade, item.dose);
+                    
+                    let statusBadge = '';
+                    let linhaCor = '';
+
+                    if (diasRestantes <= 0 || item.quantidade < item.dose) {
+                        statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">🔴 Produto Esgotado</span>`;
+                        linhaCor = 'bg-red-50/30';
+                    } else if (diasRestantes <= 5) {
+                        statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">🟡 Acabando (Repor)</span>`;
+                        linhaCor = 'bg-amber-50/30';
+                    } else {
+                        statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">🟢 Em Uso</span>`;
+                        linhaCor = '';
+                    }
+
+                    const dataFormatada = dataTermino.toLocaleDateString('pt-BR');
+                    const unidadeTexto = item.unidade || 'unidades';
+                    
+                    const mensagemWhats = encodeURIComponent(`Olá ${item.cliente}! Tudo bem? Passando para saber como você está se sentindo com o uso do ${item.produto} e se já está precisando repor o seu estoque para não ficar sem!`);
+                    const linkWhats = `https://wa.me/55${item.telefone.replace(/\D/g, '')}?text=${mensagemWhats}`;
+
+                    const tr = document.createElement('tr');
+                    tr.className = `${linhaCor} hover:bg-slate-50 transition`;
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 font-medium text-slate-900">${item.cliente}</td>
+                        <td class="px-6 py-4 text-slate-600">${item.produto} <span class="text-xs text-slate-400">(${item.quantidade} ${unidadeTexto})</span></td>
+                        <td class="px-6 py-4 text-slate-600">${dataFormatada}</td>
+                        <td class="px-6 py-4 font-semibold text-slate-700">${item.quantidade < item.dose ? '0' : diasRestantes} dias</td>
+                        <td class="px-6 py-4">${statusBadge}</td>
+                        <td class="px-6 py-4 text-right space-x-1">
+                            <a href="${linkWhats}" target="_blank" class="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg transition shadow-sm" title="Enviar WhatsApp">
+                                WhatsApp
+                            </a>
+                            <button onclick="renovarCompra('${item.id}')" class="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg transition shadow-sm" title="Renovar para a data de hoje">
+                                Renovar
+                            </button>
+                            <button onclick="removerCliente('${item.id}')" class="text-slate-400 hover:text-red-600 text-xs font-medium transition ml-1" title="Excluir">
+                                Excluir
+                            </button>
+                        </td>
+                    `;
+                    tabelaClientes.appendChild(tr);
+                });
+            }
+
+            vendaForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const novoCliente = {
+                    cliente: document.getElementById('cliente').value,
+                    telefone: document.getElementById('telefone').value,
+                    produto: selectProduto.value,
+                    quantidade: parseInt(document.getElementById('quantidade').value),
+                    unidade: document.getElementById('unidade').value,
+                    dose: parseInt(document.getElementById('dose').value),
+                    dataVenda: new Date().toISOString().split('T')[0]
+                };
+
+                await addDoc(collection(db, "clientes"), novoCliente);
+                vendaForm.reset();
+                carregarClientes();
+            });
+
+            window.renovarCompra = async function(id) {
+                if (confirm(`Deseja registrar uma nova compra para hoje?`)) {
+                    const dataHoje = new Date().toISOString().split('T')[0];
+                    await updateDoc(doc(db, "clientes", id), { dataVenda: dataHoje });
+                    carregarClientes();
+                }
+            }
+
+            window.removerCliente = async function(id) {
+                if (confirm('Deseja realmente excluir este registro?')) {
+                    await deleteDoc(doc(db, "clientes", id));
+                    carregarClientes();
+                }
+            }
+
+            // Os dados só são carregados após autenticação validada.
+        });
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen p-4 sm:p-6">
+    <section id="loginPanel" class="min-h-[80vh] flex items-center justify-center">
+        <div class="w-full max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+            <div class="text-center mb-6">
+                <div class="mx-auto w-20 h-20 rounded-full overflow-hidden border-2 border-emerald-500 mb-4 bg-white flex items-center justify-center">
+                    <img src="logo.png" alt="Logo Tasty Shake" class="w-full h-full object-cover" onerror="this.style.display='none'">
+                </div>
+                <h1 class="text-2xl font-bold text-slate-900">Tasty Shake</h1>
+                <p class="text-slate-600 mt-1">Entre para acessar o controle de clientes</p>
+            </div>
+            <form id="loginForm" class="space-y-4">
+                <div>
+                    <label for="loginUser" class="block text-sm font-medium text-slate-700 mb-1">Usuário ou e-mail</label>
+                    <input id="loginUser" type="text" autocomplete="username" required placeholder="monica" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label for="loginPassword" class="block text-sm font-medium text-slate-700 mb-1">Senha</label>
+                    <input id="loginPassword" type="password" autocomplete="current-password" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-3 rounded-lg transition">Entrar</button>
+                <p id="loginMessage" role="status" class="text-sm mt-3 text-slate-600"></p>
+            </form>
+        </div>
+    </section>
+    <div id="appContainer" class="max-w-6xl mx-auto" style="display:none">
+        <!-- Cabeçalho com Logo Arredondada -->
+        <header class="mb-8 text-center flex flex-col items-center">
+            <div class="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden shadow-md border-2 border-emerald-500 mb-4 flex items-center justify-center bg-white">
+                <img src="logo.png" alt="Logo Tasty Shake" class="w-full h-full object-cover">
+            </div>
+            <h1 class="text-3xl font-bold text-slate-900 mb-2">Controle de Clientes e Reposição</h1>
+            <p class="text-slate-600">Monitore o consumo dos produtos e saiba a hora exata de fazer uma nova venda.</p>
+            <button id="logoutButton" type="button" class="mt-4 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Sair da conta</button>
+        </header>
+
+         <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6" aria-label="Resumo de clientes">
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">👥 Clientes</p><p id="dashTotalClientes" class="text-3xl font-extrabold mt-2">0</p></div>
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">🟢 Em uso</p><p id="dashEmUso" class="text-3xl font-extrabold mt-2">0</p></div>
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">🟡 Repor em breve</p><p id="dashRepor" class="text-3xl font-extrabold mt-2">0</p></div>
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">🔴 Esgotados</p><p id="dashEsgotados" class="text-3xl font-extrabold mt-2">0</p></div>
+         </section>
+         <div id="alertBanner" class="hidden mb-5 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 p-4 text-sm font-semibold" role="status"></div>
+         <div class="flex flex-col sm:flex-row gap-3 mb-5">
+             <input id="buscaCliente" type="search" placeholder="Buscar cliente, produto ou telefone..." class="flex-1 rounded-xl border border-slate-300 px-4 py-3" aria-label="Buscar clientes">
+             <button id="btnMostrarTodos" type="button" class="rounded-xl bg-white border border-slate-300 px-5 py-3 font-semibold">👥 Todos</button>
+             <button id="btnMostrarReposicao" type="button" class="rounded-xl bg-white border border-slate-300 px-5 py-3 font-semibold">🟡 Reposição</button>
+         </div>
+        <!-- Seção de Cadastro de Produtos -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-4">Gerenciar Produtos</h2>
+            <form id="produtoForm" class="flex flex-col sm:flex-row gap-3 items-end">
+                <div class="flex-1 w-full">
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Nome do Novo Produto</label>
+                    <input type="text" id="novoProdutoNome" placeholder="Ex: Shake F1, Nutri Soup, Chá Herbal Tea..." required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <button type="submit" class="bg-slate-800 hover:bg-slate-900 text-white font-medium px-5 py-2 rounded-lg text-sm transition shadow-sm h-[38px]">
+                    Adicionar Produto
+                </button>
+            </form>
+            <div id="listaProdutosBadge" class="flex flex-wrap gap-2 mt-4"></div>
+        </div>
+
+        <!-- Formulário de Cadastro de Vendas -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-8">
+            <h2 class="text-lg font-semibold text-slate-900 mb-4">Cadastrar Nova Venda</h2>
+            <form id="vendaForm" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Nome do Cliente</label>
+                    <input type="text" id="cliente" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">WhatsApp / Telefone</label>
+                    <input type="text" id="telefone" placeholder="Ex: 79999999999" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Produto</label>
+                    <select id="produto" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white">
+                        <option value="">Selecione um produto</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Quantidade Total</label>
+                    <input type="number" id="quantidade" min="1" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Unidade de Medida</label>
+                    <select id="unidade" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white">
+                        <option value="Cápsulas">Cápsulas</option>
+                        <option value="Gramas (g)">Gramas (g)</option>
+                        <option value="Sachês">Sachês</option>
+                        <option value="Doses">Doses</option>
+                        <option value="Comprimidos">Comprimidos</option>
+                        <option value="ML">ML</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Dose Diária</label>
+                    <input type="number" id="dose" min="1" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div class="sm:col-span-2 lg:col-span-6 flex justify-end mt-2">
+                    <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition shadow-sm">
+                        Cadastrar e Calcular Lembrete
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Tabela de Clientes -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                <h2 class="text-lg font-semibold text-slate-900">Acompanhamento de Consumo</h2>
+                <span id="totalClientes" class="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">0 cadastros</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
+                            <th class="px-6 py-3 font-semibold">Cliente</th>
+                            <th class="px-6 py-3 font-semibold">Produto</th>
+                            <th class="px-6 py-3 font-semibold">Previsão Término</th>
+                            <th class="px-6 py-3 font-semibold">Dias Restantes</th>
+                            <th class="px-6 py-3 font-semibold">Status / Alerta</th>
+                            <th class="px-6 py-3 font-semibold text-right">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaClientes" class="divide-y divide-slate-100 text-sm">
+                        <!-- Preenchido via Firebase -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+                   
