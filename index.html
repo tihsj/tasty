@@ -10,6 +10,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // ==========================================================
         // COLE SUAS CHAVES DO FIREBASE ABAIXO:
@@ -27,8 +28,55 @@
         // Inicializar Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const auth = getAuth(app);
+        const AUTORIZADO_EMAIL = "espacotastyshake@gmail.com";
+        const NOME_USUARIO = "monica";
 
         document.addEventListener('DOMContentLoaded', () => {
+            const loginPanel = document.getElementById('loginPanel');
+            const appContainer = document.getElementById('appContainer');
+            const loginForm = document.getElementById('loginForm');
+            const loginUser = document.getElementById('loginUser');
+            const loginPassword = document.getElementById('loginPassword');
+            const loginMessage = document.getElementById('loginMessage');
+            const logoutButton = document.getElementById('logoutButton');
+            let dadosCarregados = false;
+
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                loginMessage.textContent = 'Verificando acesso...';
+                loginMessage.className = 'text-sm mt-3 text-slate-600';
+                const informado = loginUser.value.trim();
+                const email = informado.toLowerCase() === NOME_USUARIO ? AUTORIZADO_EMAIL : informado;
+                try {
+                    await signInWithEmailAndPassword(auth, email, loginPassword.value);
+                    loginPassword.value = '';
+                    loginMessage.textContent = '';
+                } catch (error) {
+                    loginMessage.textContent = 'Usuário ou senha inválidos. Confira os dados e tente novamente.';
+                    loginMessage.className = 'text-sm mt-3 text-red-600';
+                }
+            });
+
+            logoutButton.addEventListener('click', async () => { await signOut(auth); });
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user && user.email && user.email.toLowerCase() === AUTORIZADO_EMAIL) {
+                    loginPanel.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
+                    if (!dadosCarregados) {
+                        dadosCarregados = true;
+                        try { await carregarProdutos(); await carregarClientes(); }
+                        catch (error) { console.error(error); alert('Não foi possível carregar os dados. Confira as regras do Firestore.'); }
+                    }
+                } else {
+                    appContainer.classList.add('hidden');
+                    loginPanel.classList.remove('hidden');
+                    dadosCarregados = false;
+                    if (user) await signOut(auth);
+                }
+            });
+
             const vendaForm = document.getElementById('vendaForm');
             const produtoForm = document.getElementById('produtoForm');
             const tabelaClientes = document.getElementById('tabelaClientes');
@@ -212,14 +260,35 @@
                 }
             }
 
-            // Inicialização
-            carregarProdutos();
-            carregarClientes();
+            // Os dados só são carregados após autenticação validada.
         });
     </script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen p-4 sm:p-6">
-    <div class="max-w-6xl mx-auto">
+    <section id="loginPanel" class="min-h-[80vh] flex items-center justify-center">
+        <div class="w-full max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+            <div class="text-center mb-6">
+                <div class="mx-auto w-20 h-20 rounded-full overflow-hidden border-2 border-emerald-500 mb-4 bg-white flex items-center justify-center">
+                    <img src="logo.png" alt="Logo Tasty Shake" class="w-full h-full object-cover" onerror="this.style.display='none'">
+                </div>
+                <h1 class="text-2xl font-bold text-slate-900">Tasty Shake</h1>
+                <p class="text-slate-600 mt-1">Entre para acessar o controle de clientes</p>
+            </div>
+            <form id="loginForm" class="space-y-4">
+                <div>
+                    <label for="loginUser" class="block text-sm font-medium text-slate-700 mb-1">Usuário ou e-mail</label>
+                    <input id="loginUser" type="text" autocomplete="username" required placeholder="monica" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label for="loginPassword" class="block text-sm font-medium text-slate-700 mb-1">Senha</label>
+                    <input id="loginPassword" type="password" autocomplete="current-password" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-3 rounded-lg transition">Entrar</button>
+                <p id="loginMessage" role="status" class="text-sm mt-3 text-slate-600"></p>
+            </form>
+        </div>
+    </section>
+    <div id="appContainer" class="hidden max-w-6xl mx-auto">
         <!-- Cabeçalho com Logo Arredondada -->
         <header class="mb-8 text-center flex flex-col items-center">
             <div class="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden shadow-md border-2 border-emerald-500 mb-4 flex items-center justify-center bg-white">
@@ -227,6 +296,7 @@
             </div>
             <h1 class="text-3xl font-bold text-slate-900 mb-2">Controle de Clientes e Reposição</h1>
             <p class="text-slate-600">Monitore o consumo dos produtos e saiba a hora exata de fazer uma nova venda.</p>
+            <button id="logoutButton" type="button" class="mt-4 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Sair da conta</button>
         </header>
 
         <!-- Seção de Cadastro de Produtos -->
