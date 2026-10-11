@@ -49,6 +49,9 @@
                 await signOut(auth);
             } catch (error) {
                 console.error('Não foi possível reiniciar a sessão:', error);
+                loginMessage.textContent = 'Falha ao iniciar autenticação. Atualize a página.';
+                loginForm.querySelector('button[type=submit]').disabled = true;
+                return;
             }
 
             loginForm.addEventListener('submit', async (e) => {
@@ -71,16 +74,16 @@
 
             onAuthStateChanged(auth, async (user) => {
                 if (user && user.email && user.email.toLowerCase() === AUTORIZADO_EMAIL) {
-                    loginPanel.classList.add('hidden');
-                    appContainer.classList.remove('hidden');
+                    loginPanel.style.display = 'none';
+                    appContainer.style.display = 'block';
                     if (!dadosCarregados) {
                         dadosCarregados = true;
                         try { await carregarProdutos(); await carregarClientes(); }
                         catch (error) { console.error(error); alert('Não foi possível carregar os dados. Confira as regras do Firestore.'); }
                     }
                 } else {
-                    appContainer.classList.add('hidden');
-                    loginPanel.classList.remove('hidden');
+                    appContainer.style.display = 'none';
+                    loginPanel.style.display = 'flex';
                     dadosCarregados = false;
                     if (user) await signOut(auth);
                 }
@@ -160,7 +163,9 @@
                 querySnapshot.forEach((doc) => {
                     clientes.push({ id: doc.id, ...doc.data() });
                 });
-                renderizarTabela(clientes);
+                 clientesCache = clientes;
+                 atualizarDashboard();
+                 aplicarBusca();
             }
 
             function calcularDiasRestantes(dataVendaStr, quantidade, dose) {
@@ -176,6 +181,35 @@
 
                 return { diasRestantes, dataTermino };
             }
+
+             function atualizarDashboard() {
+                 let emUso=0, repor=0, esgotados=0;
+                 for (const item of clientesCache) {
+                     const { diasRestantes } = calcularDiasRestantes(item.dataVenda,item.quantidade,item.dose);
+                     if (diasRestantes <= 0 || item.quantidade < item.dose) esgotados++;
+                     else if (diasRestantes <= 5) repor++;
+                     else emUso++;
+                 }
+                 document.getElementById('dashTotalClientes').textContent = clientesCache.length;
+                 document.getElementById('dashEmUso').textContent = emUso;
+                 document.getElementById('dashRepor').textContent = repor;
+                 document.getElementById('dashEsgotados').textContent = esgotados;
+                 const banner=document.getElementById('alertBanner');
+                 banner.classList.toggle('hidden', !(repor+esgotados));
+                 banner.textContent = `⚠️ ${repor+esgotados} cliente(s) precisam de atenção: ${esgotados} esgotado(s) e ${repor} para reposição.`;
+             }
+             function aplicarBusca() {
+                 const termo=document.getElementById('buscaCliente').value.trim().toLowerCase();
+                 const filtrados=clientesCache.filter(item=>{
+                     const {diasRestantes}=calcularDiasRestantes(item.dataVenda,item.quantidade,item.dose);
+                     return (!filtroReposicao || diasRestantes<=5 || item.quantidade<item.dose) &&
+                         (!termo || [item.cliente,item.produto,item.telefone].some(v=>String(v||'').toLowerCase().includes(termo)));
+                 });
+                 renderizarTabela(filtrados);
+             }
+             document.getElementById('buscaCliente').addEventListener('input',aplicarBusca);
+             document.getElementById('btnMostrarTodos').addEventListener('click',()=>{filtroReposicao=false;aplicarBusca();});
+             document.getElementById('btnMostrarReposicao').addEventListener('click',()=>{filtroReposicao=true;aplicarBusca();});
 
             function renderizarTabela(clientes) {
                 tabelaClientes.innerHTML = '';
@@ -297,7 +331,7 @@
             </form>
         </div>
     </section>
-    <div id="appContainer" class="hidden max-w-6xl mx-auto">
+    <div id="appContainer" class="max-w-6xl mx-auto" style="display:none">
         <!-- Cabeçalho com Logo Arredondada -->
         <header class="mb-8 text-center flex flex-col items-center">
             <div class="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden shadow-md border-2 border-emerald-500 mb-4 flex items-center justify-center bg-white">
@@ -308,6 +342,18 @@
             <button id="logoutButton" type="button" class="mt-4 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Sair da conta</button>
         </header>
 
+         <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6" aria-label="Resumo de clientes">
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">👥 Clientes</p><p id="dashTotalClientes" class="text-3xl font-extrabold mt-2">0</p></div>
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">🟢 Em uso</p><p id="dashEmUso" class="text-3xl font-extrabold mt-2">0</p></div>
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">🟡 Repor em breve</p><p id="dashRepor" class="text-3xl font-extrabold mt-2">0</p></div>
+             <div class="bg-white rounded-xl border border-slate-200 p-4"><p class="text-xs font-bold text-slate-500 uppercase">🔴 Esgotados</p><p id="dashEsgotados" class="text-3xl font-extrabold mt-2">0</p></div>
+         </section>
+         <div id="alertBanner" class="hidden mb-5 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 p-4 text-sm font-semibold" role="status"></div>
+         <div class="flex flex-col sm:flex-row gap-3 mb-5">
+             <input id="buscaCliente" type="search" placeholder="Buscar cliente, produto ou telefone..." class="flex-1 rounded-xl border border-slate-300 px-4 py-3" aria-label="Buscar clientes">
+             <button id="btnMostrarTodos" type="button" class="rounded-xl bg-white border border-slate-300 px-5 py-3 font-semibold">👥 Todos</button>
+             <button id="btnMostrarReposicao" type="button" class="rounded-xl bg-white border border-slate-300 px-5 py-3 font-semibold">🟡 Reposição</button>
+         </div>
         <!-- Seção de Cadastro de Produtos -->
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6">
             <h2 class="text-lg font-semibold text-slate-900 mb-4">Gerenciar Produtos</h2>
